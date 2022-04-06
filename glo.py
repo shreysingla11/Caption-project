@@ -210,6 +210,9 @@ def main(
             optimizer.zero_grad()
             rec = g(zi)
             loss = loss_fn(rec, Xi)
+
+
+      
             loss.backward()
             optimizer.step()
 
