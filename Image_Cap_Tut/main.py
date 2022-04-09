@@ -473,7 +473,10 @@ def main(
             targets = pack_padded_sequence(targets, decode_lengths, batch_first=True).data
 
             scores, targets = maybe_cuda(scores), maybe_cuda(targets)
-            # print(scores.device, targets.device)
+            print(scores)
+            print("")
+            print(targets)
+            print("\n\n")
             loss = loss_fn(scores, targets)
             loss += alpha_c * ((1. - alphas.sum(dim=1)) ** 2).mean()
 
