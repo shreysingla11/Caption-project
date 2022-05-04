@@ -9,18 +9,25 @@ from torch import nn
 import torch.nn.functional as fnn
 from torch.autograd import Variable
 from torch.optim import SGD
-from torchvision.datasets import LSUN
 from torchvision import transforms
 from torch.utils.data import Dataset
 from torchvision.utils import make_grid
 
+class Flickr8K(Dataset):
+    def __init__(self, root_dir='./data/', mode='train', transform=None):
+        super().__init__()
+        self.files = [root_dir + line.strip() for line in open(root_dir + f'/{mode}.txt').readlines()]
+        self.transform = transform
 
-
-
-
-
-
-
+    def __len__(self):
+        return len(self.files)
+    
+    def __getitem__(self, idx):
+        image = Image.open(self.files[idx])
+        if self.transform is None:
+            return image, idx
+        else:
+            return self.transform(image), idx
 
 def build_gauss_kernel(size=5, sigma=1.0, n_channels=1, cuda=False):
     if size % 2 != 1:
@@ -95,6 +102,26 @@ class IndexedDataset(Dataset):
         return (img, label, idx)
 
 
+class Generator(nn.Module):
+    def __init__(self, code_dim, n_filter=64, out_channels=3):
+        super(Generator, self).__init__()
+        self.code_dim = code_dim
+        nf = n_filter
+        self.dcnn = nn.Sequential(
+            nn.ConvTranspose2d(code_dim, nf * 8, 4, 1, 0, bias=False), # 2x2
+            nn.BatchNorm2d(nf * 8), nn.ReLU(True),
+            nn.ConvTranspose2d(nf * 8, nf * 4, 4, 2, 1, bias=False), # 4x4
+            nn.BatchNorm2d(nf * 4), nn.ReLU(True),
+            nn.ConvTranspose2d(nf * 4, nf * 2, 4, 2, 1, bias=False), # 8x8
+            nn.BatchNorm2d(nf * 2), nn.ReLU(True),
+            nn.ConvTranspose2d(nf * 2, nf    , 4, 2, 1, bias=False), # 16x16
+            nn.BatchNorm2d(nf), nn.ReLU(True),
+            nn.ConvTranspose2d(nf, out_channels, 4, 2, 1, bias=False), # 32x32
+            nn.Tanh(),
+        )
+
+    def forward(self, code):
+        return self.dcnn(code.view(code.size(0), self.code_dim, 1, 1))
 
 
 def project_l2_ball(z):
@@ -135,15 +162,26 @@ def main(
 
     def maybe_cuda(tensor):
         return tensor.cuda() if use_cuda else tensor
-
+    
+    """
     train_set = IndexedDataset(
-        LSUN(lsun_data_dir, classes=['church_outdoor_train'], 
+        LSUN(lsun_data_dir, classes=['bedroom_train'], 
              transform=transforms.Compose([
                  transforms.Resize(64),
                  transforms.CenterCrop(64),
                  transforms.ToTensor(),
                  transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
              ]))
+    )
+    """
+    train_set = Flickr8K(
+        root_dir='./data/',
+        transform=transforms.Compose([
+             transforms.Resize(64),
+             transforms.CenterCrop(64),
+             transforms.ToTensor(),
+             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        ])
     )
     train_loader = torch.utils.data.DataLoader(
         train_set, batch_size=batch_size, 
@@ -153,32 +191,30 @@ def main(
     # we don't really have a validation set here, but for visualization let us 
     # just take the first couple images from the dataset
     val_loader = torch.utils.data.DataLoader(train_set, shuffle=False, batch_size=8*8)
-
+    
+    """
     if max_num_samples > 0:
         train_set.base.length = max_num_samples
         train_set.base.indices = [max_num_samples]
+    """
 
     # initialize representation space:
     if init == 'pca':
         from sklearn.decomposition import PCA
 
         # first, take a subset of train set to fit the PCA
-        print(n_pca)
-        print(train_loader.batch_size)
-        print(n_pca // train_loader.batch_size)
-        # print(next(train_loader))
-        print(iter(train_loader))
-
         X_pca = np.vstack([
             X.cpu().numpy().reshape(len(X), -1)
-            for i, (X, _, _) in zip(range(n_pca // train_loader.batch_size), train_loader)
+            for i, (X, _)
+             in zip(tqdm(range(n_pca // train_loader.batch_size), 'collect data for PCA'), 
+                    train_loader)
         ])
         print("perform PCA...")
         pca = PCA(n_components=code_dim)
         pca.fit(X_pca)
         # then, initialize latent vectors to the pca projections of the complete dataset
         Z = np.empty((len(train_loader.dataset), code_dim))
-        for X, _, idx in tqdm(train_loader, 'pca projection'):
+        for X, idx in tqdm(train_loader, 'pca projection'):
             Z[idx] = pca.transform(X.cpu().numpy().reshape(len(X), -1))
 
     elif init == 'random':
@@ -195,7 +231,7 @@ def main(
         {'params': zi, 'lr': lr_z}
     ])
 
-    Xi_val, _, idx_val = next(iter(val_loader))
+    Xi_val, idx_val = next(iter(val_loader))
     imsave('target.png',
            make_grid(Xi_val.cpu() / 2. + 0.5, nrow=8).numpy().transpose(1, 2, 0))
 
@@ -203,21 +239,18 @@ def main(
         losses = []
         progress = tqdm(total=len(train_loader), desc='epoch % 3d' % epoch)
 
-        for i, (Xi, yi, idx) in enumerate(train_loader):
+        for i, (Xi, idx) in enumerate(train_loader):
             Xi = Variable(maybe_cuda(Xi))
             zi.data = maybe_cuda(torch.FloatTensor(Z[idx.numpy()]))
 
             optimizer.zero_grad()
             rec = g(zi)
             loss = loss_fn(rec, Xi)
-
-
-      
             loss.backward()
             optimizer.step()
 
             Z[idx.numpy()] = project_l2_ball(zi.data.cpu().numpy())
-            print(loss)
+
             losses.append(loss.item())
             progress.set_postfix({'loss': np.mean(losses[-100:])})
             progress.update()
@@ -228,6 +261,9 @@ def main(
         rec = g(Variable(maybe_cuda(torch.FloatTensor(Z[idx_val.numpy()]))))
         imsave('%s_rec_epoch_%03d.png' % (image_output_prefix, epoch), 
                make_grid(rec.data.cpu() / 2. + 0.5, nrow=8).numpy().transpose(1, 2, 0))
+        if epoch % 50 == 0:
+            torch.save(g.state_dict(), f'./g_epoch={epoch:04d}.pt')
+    torch.save(g.state_dict(), './g_epoch=last.pt')
 
 if __name__ == "__main__":
     plac.call(main)
