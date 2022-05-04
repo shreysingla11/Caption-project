@@ -6,6 +6,8 @@ from transformers import GPTJConfig, GPTJModel, Trainer, TrainingArguments, Auto
 from model import GLOCaptions
 from glo import Generator, Flickr8K
 
+set_seed(1618)
+
 DATA_ROOT = '../../../data/'
 
 GLO_CKPT = '../../g_epoch=1550.pt'
@@ -19,7 +21,7 @@ DECODER_CONFIG = GPTJConfig(
 ) # ~63.5M parameters
 DECODER_PRETRAINED = None # Can be replaced with `EleutherAI/gpt-j-6B`
 
-tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-j-6B")
+tokenizer = AutoTokenizer.from_pretrained('EleutherAI/gpt-j-6B')
 
 num_train = 250
 save_steps = 1000
@@ -58,7 +60,7 @@ def main():
 
     decoder = GPTJModel(DECODER_CONFIG) if DECODER_PRETRAINED is None else GPTJModel.from_pretrained(DECODER_PRETRAINED)
 
-    transforms = transform=transforms.Compose([
+    transform = transforms.Compose([
         transforms.Resize(64),
         transforms.CenterCrop(64),
         transforms.ToTensor(),
@@ -66,8 +68,8 @@ def main():
     ])
     model = GLOCaptions(glo, decoder)
 
-    train = Flickr8K(root_dir=DATA_ROOT, mode='train', transform=transforms)
-    dev = Flickr8K(root_dir=DATA_ROOT, mode='dev', transform=transforms)
+    train = Flickr8K(root_dir=DATA_ROOT, mode='train', transform=transform)
+    dev = Flickr8K(root_dir=DATA_ROOT, mode='dev', transform=transform)
 
     trainer = Trainer(
         model=model,
