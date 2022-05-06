@@ -23,7 +23,7 @@ The proposed framework can also be unintentionally used for text-to-image synthe
 2. Optimize this latent vector till the text decoder outputs the required caption (threshold on BLEU)
 3. Use the optimized latent vector on the image decoder to obtain results 
 
-For caption, "A girl in blue dress sitting on the ground eating cotton candy" following images were generated (GLO done 5 times with 5 random starts)
+For caption, "A girl in blue dress sitting on the ground eating cotton candy" following images were generated (GLO done with 5 random starting vectors)
 
 ![image](https://user-images.githubusercontent.com/22210756/167076063-ad42d7e9-711a-440b-883d-424ed298f204.png)
 
